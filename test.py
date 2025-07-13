@@ -7,7 +7,7 @@ from datetime import datetime, timedelta
 import pytz
 import asyncio
 import logging
-# hrere
+
 async def take(update: Update, context: ContextTypes.DEFAULT_TYPE):
     if len(context.args) != 2:
         await update.message.reply_text("Usage: /take <day> <morning/night>")
