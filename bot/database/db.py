@@ -1,34 +1,59 @@
 """
 Database engine and session factory.
 Supports SQLite (local dev), PostgreSQL (Supabase, Neon, Render), etc.
+Handles special character URL-encoding in passwords automatically.
 """
 from __future__ import annotations
 
+import urllib.parse
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
-import urllib.parse
 
 from sqlalchemy.ext.asyncio import AsyncSession, async_sessionmaker, create_async_engine
 
 from bot.config import settings
 from bot.models import Base
 
-db_url = settings.DATABASE_URL
-connect_args = {}
 
-if db_url.startswith("sqlite"):
-    db_url = db_url.replace("sqlite:///", "sqlite+aiosqlite:///")
-    connect_args["check_same_thread"] = False
-else:
-    # Handle postgres:// or postgresql:// scheme
-    if db_url.startswith("postgres://"):
-        db_url = db_url.replace("postgres://", "postgresql+asyncpg://", 1)
-    elif db_url.startswith("postgresql://"):
-        db_url = db_url.replace("postgresql://", "postgresql+asyncpg://", 1)
+def _prepare_db_url(url_str: str) -> tuple[str, dict]:
+    """Parse and format database URL for SQLAlchemy + async drivers."""
+    connect_args = {}
 
-    # Supabase / Neon SSL support
-    if "sslmode=require" in db_url or "supabase" in db_url or "neon.tech" in db_url:
-        connect_args["ssl"] = "require"
+    if url_str.startswith("sqlite"):
+        formatted_url = url_str.replace("sqlite:///", "sqlite+aiosqlite:///")
+        connect_args["check_same_thread"] = False
+        return formatted_url, connect_args
+
+    is_postgres = url_str.startswith(("postgres://", "postgresql://"))
+    if url_str.startswith("postgres://"):
+        formatted_url = url_str.replace("postgres://", "postgresql+asyncpg://", 1)
+    elif url_str.startswith("postgresql://"):
+        formatted_url = url_str.replace("postgresql://", "postgresql+asyncpg://", 1)
+    else:
+        formatted_url = url_str
+
+    # Clean up query params if present (e.g. sslmode=require)
+    query_str = ""
+    scheme, rest = formatted_url.split("://", 1)
+    if "?" in rest:
+        rest, query_str = rest.split("?", 1)
+
+    # Safely URL-encode user and password if special chars like @ are present
+    if "@" in rest:
+        userinfo, hostinfo = rest.rsplit("@", 1)
+        if ":" in userinfo:
+            user, pwd = userinfo.split(":", 1)
+            user_enc = urllib.parse.quote_plus(urllib.parse.unquote(user))
+            pwd_enc = urllib.parse.quote_plus(urllib.parse.unquote(pwd))
+            formatted_url = f"{scheme}://{user_enc}:{pwd_enc}@{hostinfo}"
+
+    if is_postgres:
+        connect_args["ssl"] = True
+
+    return formatted_url, connect_args
+
+
+db_url, connect_args = _prepare_db_url(settings.DATABASE_URL)
 
 engine = create_async_engine(
     db_url,
