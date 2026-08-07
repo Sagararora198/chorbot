@@ -515,6 +515,7 @@ def get_vacation_conv() -> ConversationHandler:
         fallbacks=[
             CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern="^cancel$"),
         ],
+        per_message=False,
     )
 
 
@@ -529,4 +530,5 @@ def get_handover_conv() -> ConversationHandler:
         fallbacks=[
             CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern="^cancel$"),
         ],
+        per_message=False,
     )

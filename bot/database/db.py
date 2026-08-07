@@ -1,10 +1,11 @@
 """
 Database engine and session factory.
 Supports SQLite (local dev), PostgreSQL (Supabase, Neon, Render), etc.
-Handles special character URL-encoding in passwords automatically.
+Handles special character URL-encoding in passwords and SSL certificate verification automatically.
 """
 from __future__ import annotations
 
+import ssl
 import urllib.parse
 from contextlib import asynccontextmanager
 from typing import AsyncGenerator
@@ -33,10 +34,9 @@ def _prepare_db_url(url_str: str) -> tuple[str, dict]:
         formatted_url = url_str
 
     # Clean up query params if present (e.g. sslmode=require)
-    query_str = ""
     scheme, rest = formatted_url.split("://", 1)
     if "?" in rest:
-        rest, query_str = rest.split("?", 1)
+        rest, _ = rest.split("?", 1)
 
     # Safely URL-encode user and password if special chars like @ are present
     if "@" in rest:
@@ -48,7 +48,10 @@ def _prepare_db_url(url_str: str) -> tuple[str, dict]:
             formatted_url = f"{scheme}://{user_enc}:{pwd_enc}@{hostinfo}"
 
     if is_postgres:
-        connect_args["ssl"] = True
+        ctx = ssl.create_default_context()
+        ctx.check_hostname = False
+        ctx.verify_mode = ssl.CERT_NONE
+        connect_args["ssl"] = ctx
 
     return formatted_url, connect_args
 

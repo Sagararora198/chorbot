@@ -503,6 +503,7 @@ def get_addchore_conv() -> ConversationHandler:
             CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern="^cancel$"),
         ],
         allow_reentry=True,
+        per_message=False,
     )
 
 
@@ -515,4 +516,5 @@ def get_removemember_conv() -> ConversationHandler:
         fallbacks=[
             CallbackQueryHandler(lambda u, c: ConversationHandler.END, pattern="^cancel$"),
         ],
+        per_message=False,
     )
