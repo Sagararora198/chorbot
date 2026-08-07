@@ -2,7 +2,7 @@
 Database engine and session factory.
 Supports SQLite (local dev), PostgreSQL (Supabase, Neon, Render), etc.
 Handles special character URL-encoding in passwords, SSL certificate verification,
-and PgBouncer statement_cache_size=0 automatically.
+and PgBouncer statement_cache_size=0 + anonymous prepared statements automatically.
 """
 from __future__ import annotations
 
@@ -53,9 +53,10 @@ def _prepare_db_url(url_str: str) -> tuple[str, dict]:
         ctx.check_hostname = False
         ctx.verify_mode = ssl.CERT_NONE
         connect_args["ssl"] = ctx
-        # PgBouncer transaction mode compatibility
+        # PgBouncer transaction pooler compatibility
         connect_args["statement_cache_size"] = 0
         connect_args["prepared_statement_cache_size"] = 0
+        connect_args["prepared_statement_name_func"] = lambda: ""
 
     return formatted_url, connect_args
 
