@@ -43,14 +43,18 @@ logger = logging.getLogger(__name__)
 
 async def post_init(application) -> None:
     """Called after the application is initialised."""
-    # Ensure all DB tables exist
-    await init_db()
-    logger.info("Database initialised.")
+    try:
+        # Ensure all DB tables exist
+        await init_db()
+        logger.info("Database initialised.")
 
-    # Generate initial schedule
-    async with get_session() as session:
-        await generate_schedule(session)
-    logger.info("Initial schedule generated.")
+        # Generate initial schedule
+        async with get_session() as session:
+            await generate_schedule(session)
+        logger.info("Initial schedule generated.")
+    except Exception as e:
+        logger.error(f"❌ Database initialization failed: {type(e).__name__}: {e}", exc_info=True)
+        raise
 
     # Build and start the scheduler
     scheduler = build_scheduler(application.bot)
