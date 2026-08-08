@@ -26,7 +26,8 @@ from bot.handlers import (
     leaderboard_handler, whoisnext_handler,
     done_callback, handover_accept_callback, emergency_take_callback,
     schedule_callback,
-    get_vacation_conv, get_handover_conv, get_markdone_conv,
+    get_vacation_conv, get_handover_conv,
+    markdone_start, markdone_select_assignment, markdone_select_member,
     # Callbacks
     admin_callback_router, chore_select_callback,
     delete_chore_confirm_callback, all_stats_handler, cancel_callback,
@@ -93,6 +94,7 @@ def main() -> None:
     app.add_handler(CommandHandler("leaderboard", leaderboard_handler))
     app.add_handler(CommandHandler("whoisnext", whoisnext_handler))
     app.add_handler(CommandHandler("schedule", upcoming_handler))
+    app.add_handler(CommandHandler("markdone", markdone_start))
 
     # ── Standalone callbacks BEFORE conversations ─────────────────────────────
     # Active ConversationHandlers swallow unmatched callbacks; keep delete/admin
@@ -104,6 +106,8 @@ def main() -> None:
     app.add_handler(CallbackQueryHandler(admin_callback_router, pattern="^admin:"))
     app.add_handler(CallbackQueryHandler(chore_select_callback, pattern="^chore_select:"))
     app.add_handler(CallbackQueryHandler(delete_chore_confirm_callback, pattern="^delete_chore_confirm:"))
+    app.add_handler(CallbackQueryHandler(markdone_select_assignment, pattern="^markdone_asgn:"))
+    app.add_handler(CallbackQueryHandler(markdone_select_member, pattern="^markdone_user:"))
     app.add_handler(CallbackQueryHandler(today_handler, pattern="^menu:today$"))
     app.add_handler(CallbackQueryHandler(upcoming_handler, pattern="^menu:schedule$"))
     app.add_handler(CallbackQueryHandler(mystats_handler, pattern="^menu:mystats$"))
@@ -115,7 +119,6 @@ def main() -> None:
     app.add_handler(get_removemember_conv())
     app.add_handler(get_vacation_conv())  # includes menu:vacation
     app.add_handler(get_handover_conv())
-    app.add_handler(get_markdone_conv())
 
     # Generic cancel for confirm dialogs outside conversations
     app.add_handler(CallbackQueryHandler(cancel_callback, pattern="^cancel$"))

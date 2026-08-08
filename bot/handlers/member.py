@@ -41,8 +41,6 @@ TZ = pytz.timezone(settings.TIMEZONE)
 # ── Conversation states ──────────────────────────────────────────────────────
 VAC_START, VAC_END = range(2)
 HANDOVER_REASON = 4
-# Admin mark-done flow (someone already completed the chore)
-MD_SELECT_ASSIGNMENT, MD_SELECT_MEMBER = range(5, 7)
 
 
 async def _get_member(session, tg_id: int) -> User | None:
@@ -554,17 +552,19 @@ async def whoisnext_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) 
 
 # ─────────────────────────────────────────────────────────────────────────────
 # /markdone — admin: credit someone who already did today's chore
+# Standalone callbacks (not ConversationHandler) so taps are never swallowed.
 # ─────────────────────────────────────────────────────────────────────────────
 
-async def markdone_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
-    """
-    Let admin match reality: if someone already did a chore today,
-    credit them and realign the rotation for future assignments.
-    """
+def _is_admin(update: Update) -> bool:
     user = update.effective_user
-    if not user or user.id != settings.ADMIN_TELEGRAM_ID:
+    return bool(user and user.id == settings.ADMIN_TELEGRAM_ID)
+
+
+async def markdone_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
+    """Show today's open assignments to credit as already done."""
+    if not _is_admin(update):
         await reply_text(update, "⛔ This command is for admins only.")
-        return ConversationHandler.END
+        return
 
     today = today_tz()
     today_start = datetime(today.year, today.month, today.day, 0, 0, 0)
@@ -595,9 +595,8 @@ async def markdone_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 update,
                 "No open assignments for today. Create a chore first with /addchore."
             )
-            return ConversationHandler.END
+            return
 
-        # Build selection keyboard
         from telegram import InlineKeyboardButton, InlineKeyboardMarkup
         rows = []
         for asgn in assignments:
@@ -609,24 +608,36 @@ async def markdone_start(update: Update, context: ContextTypes.DEFAULT_TYPE) -> 
                 )
             ])
         rows.append([InlineKeyboardButton("❌ Cancel", callback_data="cancel")])
+        keyboard = InlineKeyboardMarkup(rows)
 
-    await reply_html(
-        update,
+    text = (
         "✅ <b>Mark Already Done</b>\n\n"
         "Someone already finished a chore today? Pick the assignment to match:\n"
-        "<i>Next you'll choose who actually did it — rotation updates from them.</i>",
-        reply_markup=InlineKeyboardMarkup(rows),
+        "<i>Next you'll choose who actually did it — rotation updates from them.</i>"
     )
-    return MD_SELECT_ASSIGNMENT
+
+    query = update.callback_query
+    if query:
+        await query.answer()
+        await query.edit_message_text(text, parse_mode="HTML", reply_markup=keyboard)
+    else:
+        await reply_html(update, text, reply_markup=keyboard)
 
 
 async def markdone_select_assignment(
     update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> int:
+) -> None:
     query = update.callback_query
+    if not _is_admin(update):
+        await query.answer("Admins only.", show_alert=True)
+        return
     await query.answer()
-    assignment_id = int(query.data.split(":")[1])
-    context.user_data["markdone_assignment_id"] = assignment_id
+
+    try:
+        assignment_id = int(query.data.split(":")[1])
+    except (IndexError, ValueError):
+        await query.edit_message_text("❌ Invalid selection.")
+        return
 
     async with get_session() as session:
         asgn_res = await session.execute(
@@ -637,7 +648,7 @@ async def markdone_select_assignment(
         assignment = asgn_res.scalars().first()
         if not assignment:
             await query.edit_message_text("❌ Assignment not found.")
-            return ConversationHandler.END
+            return
 
         members_res = await session.execute(
             select(User).where(User.active == True).order_by(User.name)
@@ -648,13 +659,14 @@ async def markdone_select_assignment(
 
     if not members:
         await query.edit_message_text("No active members.")
-        return ConversationHandler.END
+        return
 
     from telegram import InlineKeyboardButton, InlineKeyboardMarkup
+    # Encode both ids in callback so we don't rely on conversation user_data
     rows = [
         [InlineKeyboardButton(
             f"{'✅ ' if m.name == current_name else ''}{m.name}",
-            callback_data=f"markdone_user:{m.id}",
+            callback_data=f"markdone_user:{assignment_id}:{m.id}",
         )]
         for m in members
     ]
@@ -666,52 +678,71 @@ async def markdone_select_assignment(
         parse_mode="HTML",
         reply_markup=InlineKeyboardMarkup(rows),
     )
-    return MD_SELECT_MEMBER
 
 
 async def markdone_select_member(
     update: Update, context: ContextTypes.DEFAULT_TYPE
-) -> int:
+) -> None:
     query = update.callback_query
+    if not _is_admin(update):
+        await query.answer("Admins only.", show_alert=True)
+        return
     await query.answer()
-    user_id = int(query.data.split(":")[1])
-    assignment_id = context.user_data.get("markdone_assignment_id")
 
-    async with get_session() as session:
-        asgn_res = await session.execute(
-            select(Assignment)
-            .options(selectinload(Assignment.chore))
-            .where(Assignment.id == assignment_id)
+    try:
+        parts = query.data.split(":")
+        # markdone_user:{assignment_id}:{user_id}
+        assignment_id = int(parts[1])
+        user_id = int(parts[2])
+    except (IndexError, ValueError):
+        await query.edit_message_text("❌ Invalid selection.")
+        return
+
+    try:
+        async with get_session() as session:
+            asgn_res = await session.execute(
+                select(Assignment)
+                .options(selectinload(Assignment.chore))
+                .where(Assignment.id == assignment_id)
+            )
+            assignment = asgn_res.scalars().first()
+            member_res = await session.execute(select(User).where(User.id == user_id))
+            member = member_res.scalars().first()
+
+            if not assignment or not member:
+                await query.edit_message_text("❌ Could not update assignment.")
+                return
+
+            if assignment.status == AssignmentStatus.COMPLETED:
+                await query.edit_message_text("✅ That chore is already marked done.")
+                return
+
+            # Reassign to the person who actually did it, then complete
+            assignment.user_id = member.id
+            assignment.status = AssignmentStatus.COMPLETED
+            assignment.completed_at = datetime.utcnow()
+            assignment.reminder_sent = True
+
+            await record_completion(session, member)
+            await generate_schedule(session)
+
+            chore_name = assignment.chore.name
+            member_name = member.name
+            await notify_group_task_done(query.bot, member, assignment)
+
+        await query.edit_message_text(
+            f"✅ Matched! <b>{chore_name}</b> credited to <b>{member_name}</b>.\n"
+            f"Schedule regenerated so the next rotation continues after them.",
+            parse_mode="HTML",
         )
-        assignment = asgn_res.scalars().first()
-        member_res = await session.execute(select(User).where(User.id == user_id))
-        member = member_res.scalars().first()
-
-        if not assignment or not member:
-            await query.edit_message_text("❌ Could not update assignment.")
-            return ConversationHandler.END
-
-        # Reassign to the person who actually did it, then complete
-        assignment.user_id = member.id
-        assignment.status = AssignmentStatus.COMPLETED
-        assignment.completed_at = datetime.utcnow()
-        assignment.reminder_sent = True
-
-        await record_completion(session, member)
-        # Realign future rotation from this completion
-        await generate_schedule(session)
-
-        chore_name = assignment.chore.name
-        member_name = member.name
-        await notify_group_task_done(query.bot, member, assignment)
-
-    await query.edit_message_text(
-        f"✅ Matched! <b>{chore_name}</b> credited to <b>{member_name}</b>.\n"
-        f"Schedule regenerated so the next rotation continues after them.",
-        parse_mode="HTML",
-    )
-    context.user_data.clear()
-    return ConversationHandler.END
+    except Exception as e:
+        logger.error("markdone failed: %s", e, exc_info=True)
+        try:
+            await query.edit_message_text(
+                "❌ Could not mark as done. Please try /markdone again."
+            )
+        except Exception:
+            pass
 
 
 async def _cancel_conversation(update: Update, context: ContextTypes.DEFAULT_TYPE) -> int:
@@ -767,21 +798,3 @@ def get_handover_conv() -> ConversationHandler:
     )
 
 
-def get_markdone_conv() -> ConversationHandler:
-    return ConversationHandler(
-        entry_points=[CommandHandler("markdone", markdone_start)],
-        states={
-            MD_SELECT_ASSIGNMENT: [
-                CallbackQueryHandler(markdone_select_assignment, pattern="^markdone_asgn:"),
-            ],
-            MD_SELECT_MEMBER: [
-                CallbackQueryHandler(markdone_select_member, pattern="^markdone_user:"),
-            ],
-        },
-        fallbacks=[
-            CallbackQueryHandler(_cancel_conversation, pattern="^cancel$"),
-            CommandHandler("cancel", _cancel_conversation),
-        ],
-        per_message=False,
-        allow_reentry=True,
-    )

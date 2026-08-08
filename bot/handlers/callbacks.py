@@ -84,10 +84,8 @@ async def admin_callback_router(update: Update, context: ContextTypes.DEFAULT_TY
         )
 
     elif action == "markdone":
-        await query.edit_message_text(
-            "✅ Someone already finished a chore today?\n"
-            "Use /markdone to credit them and realign the schedule."
-        )
+        from bot.handlers.member import markdone_start
+        await markdone_start(update, context)
 
     elif action == "settings":
         await query.edit_message_text(
