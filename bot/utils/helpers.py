@@ -56,3 +56,37 @@ def parse_time(t: str) -> bool:
         return True
     except ValueError:
         return False
+
+
+async def reply_html(update: Update, text: str, **kwargs) -> None:
+    """
+    Reply with HTML for both command messages and menu callback buttons.
+    CallbackQuery updates have update.message == None — must use query.message.
+    """
+    query = update.callback_query
+    if query:
+        # Answer only if not already answered by the caller
+        try:
+            await query.answer()
+        except Exception:
+            pass
+        if query.message:
+            await query.message.reply_html(text, **kwargs)
+        return
+    if update.message:
+        await update.message.reply_html(text, **kwargs)
+
+
+async def reply_text(update: Update, text: str, **kwargs) -> None:
+    """Reply with plain text for both commands and menu callback buttons."""
+    query = update.callback_query
+    if query:
+        try:
+            await query.answer()
+        except Exception:
+            pass
+        if query.message:
+            await query.message.reply_text(text, **kwargs)
+        return
+    if update.message:
+        await update.message.reply_text(text, **kwargs)

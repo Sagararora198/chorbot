@@ -8,3 +8,4 @@ __pycache__/
 backup_*.db
 *.log
 .DS_Store
+.env.example

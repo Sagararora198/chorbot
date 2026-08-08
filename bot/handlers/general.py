@@ -13,6 +13,8 @@ from bot.database import get_session
 from bot.keyboards.inline import main_menu_keyboard
 from bot.models import Statistics, User
 from bot.config import settings
+from bot.services.assignment_engine import generate_schedule
+from bot.utils.helpers import reply_html
 
 logger = logging.getLogger(__name__)
 
@@ -26,7 +28,7 @@ async def start_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         f"Use /join to register yourself as a flat member.\n"
         f"Then use the menu below to manage your chores!"
     )
-    await update.message.reply_html(text, reply_markup=main_menu_keyboard())
+    await reply_html(update, text, reply_markup=main_menu_keyboard())
 
 
 async def join_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -42,7 +44,8 @@ async def join_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         if existing:
             if not existing.active:
                 existing.active = True
-                status = "♻️ Welcome back! Your account has been reactivated."
+                await generate_schedule(session)
+                status = "♻️ Welcome back! Your account has been reactivated and schedule updated."
             else:
                 status = "ℹ️ You are already registered as a member!"
         else:
@@ -57,11 +60,14 @@ async def join_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
             )
             session.add(new_user)
             await session.flush()
-            # Create stats record
             session.add(Statistics(user_id=new_user.id))
-            status = f"✅ <b>{new_user.name}</b> joined the flat! Assignments will include you from the next schedule refresh."
+            await generate_schedule(session)
+            status = (
+                f"✅ <b>{new_user.name}</b> joined the flat! "
+                f"You're now included in the chore schedule."
+            )
 
-    await update.message.reply_html(status)
+    await reply_html(update, status)
 
 
 async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
@@ -73,23 +79,21 @@ async def help_handler(update: Update, context: ContextTypes.DEFAULT_TYPE) -> No
         "/join — Register as a flat member\n"
         "/today — View today's assigned chores\n"
         "/upcoming — View upcoming schedule\n"
-        "/done — Mark a task complete\n"
-        "/handover — Request a handover\n"
-        "/swap — Swap a future shift\n"
         "/vacation — Set vacation dates\n"
         "/mystats — View your personal stats\n"
         "/whoisnext — Who's next for each chore?\n"
         "/leaderboard — Completion leaderboard\n\n"
+        "<i>Mark done / handover via buttons on reminders or /today.</i>\n\n"
         "<b>🔧 Admin Commands</b>\n"
         "/admin — Admin panel\n"
         "/addmember — Add a member by Telegram ID\n"
         "/removemember — Deactivate a member\n"
         "/addchore — Create a new chore (guided flow)\n"
-        "/editchore — Edit an existing chore\n"
         "/deletechore — Delete a chore\n"
+        "/markdone — Credit someone who already did today's chore\n"
         "/schedule — Full upcoming schedule\n"
         "/stats — All member statistics\n"
-        "/reset — Reset all assignments\n"
+        "/reset — Regenerate assignments\n"
         "/backup — Download database backup\n"
     )
-    await update.message.reply_html(text)
+    await reply_html(update, text)

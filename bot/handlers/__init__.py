@@ -9,11 +9,11 @@ from .member import (
     leaderboard_handler, whoisnext_handler,
     done_callback, handover_accept_callback, emergency_take_callback,
     schedule_callback,
-    get_vacation_conv, get_handover_conv,
+    get_vacation_conv, get_handover_conv, get_markdone_conv,
 )
 from .callbacks import (
     admin_callback_router, chore_select_callback,
-    delete_chore_confirm_callback, all_stats_handler,
+    delete_chore_confirm_callback, all_stats_handler, cancel_callback,
 )
 
 __all__ = [
@@ -25,7 +25,7 @@ __all__ = [
     "leaderboard_handler", "whoisnext_handler",
     "done_callback", "handover_accept_callback", "emergency_take_callback",
     "schedule_callback",
-    "get_vacation_conv", "get_handover_conv",
+    "get_vacation_conv", "get_handover_conv", "get_markdone_conv",
     "admin_callback_router", "chore_select_callback",
-    "delete_chore_confirm_callback", "all_stats_handler",
+    "delete_chore_confirm_callback", "all_stats_handler", "cancel_callback",
 ]

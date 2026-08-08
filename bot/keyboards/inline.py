@@ -87,10 +87,10 @@ def admin_menu_keyboard() -> InlineKeyboardMarkup:
         ],
         [
             InlineKeyboardButton("🧹 Add Chore", callback_data="admin:addchore"),
-            InlineKeyboardButton("✏️ Edit Chore", callback_data="admin:editchore"),
+            InlineKeyboardButton("🗑 Delete Chore", callback_data="admin:deletechore"),
         ],
         [
-            InlineKeyboardButton("🗑 Delete Chore", callback_data="admin:deletechore"),
+            InlineKeyboardButton("✅ Mark Already Done", callback_data="admin:markdone"),
             InlineKeyboardButton("⚙️ Settings", callback_data="admin:settings"),
         ],
         [

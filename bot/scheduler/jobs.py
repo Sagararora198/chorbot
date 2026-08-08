@@ -26,6 +26,7 @@ from bot.services.notification_service import (
 from bot.services.stats_service import get_weekly_report_data, record_missed
 
 from sqlalchemy import select
+from sqlalchemy.orm import selectinload
 
 logger = logging.getLogger(__name__)
 TZ = pytz.timezone(settings.TIMEZONE)
@@ -44,6 +45,7 @@ async def send_chore_reminders_job(bot: Bot) -> None:
     async with get_session() as session:
         result = await session.execute(
             select(Assignment)
+            .options(selectinload(Assignment.chore))
             .where(
                 Assignment.scheduled_date >= today_start,
                 Assignment.scheduled_date < today_start + timedelta(days=1),
@@ -56,24 +58,34 @@ async def send_chore_reminders_job(bot: Bot) -> None:
         for assignment in assignments:
             chore = assignment.chore
             reminder_times: list[str] = chore.reminder_times or []
+            # reminder_index = next reminder slot to fire (supports multi-reminder chores)
+            next_idx = assignment.reminder_index or 0
+            if next_idx >= len(reminder_times):
+                assignment.reminder_sent = True
+                continue
 
-            if current_hhmm in reminder_times:
+            # Fire when current time matches the next due reminder (in configured order)
+            if current_hhmm == reminder_times[next_idx]:
                 user_res = await session.execute(
                     select(User).where(User.id == assignment.user_id)
                 )
                 user = user_res.scalars().first()
                 if user:
                     await send_reminder(bot, assignment, user, current_hhmm)
-                    assignment.reminder_sent = True
+                    assignment.reminder_index = next_idx + 1
+                    # Only mark fully sent after the last configured reminder
+                    if assignment.reminder_index >= len(reminder_times):
+                        assignment.reminder_sent = True
                     logger.info(
-                        f"Sent reminder: {chore.name} → {user.name} at {current_hhmm}"
+                        f"Sent reminder {assignment.reminder_index}/{len(reminder_times)}: "
+                        f"{chore.name} → {user.name} at {current_hhmm}"
                     )
 
 
 async def check_overdue_tasks_job(bot: Bot) -> None:
     """
     Runs every hour.
-    Marks tasks as MISSED if the reminder timeout has passed and they're still PENDING.
+    Marks tasks as MISSED if the last reminder + timeout has passed and still PENDING.
     Also sends overdue notification to the group.
     """
     timeout = settings.REMINDER_TIMEOUT_MINUTES
@@ -85,6 +97,7 @@ async def check_overdue_tasks_job(bot: Bot) -> None:
     async with get_session() as session:
         result = await session.execute(
             select(Assignment)
+            .options(selectinload(Assignment.chore))
             .where(
                 Assignment.scheduled_date >= today_start,
                 Assignment.scheduled_date < today_start + timedelta(days=1),
@@ -98,24 +111,24 @@ async def check_overdue_tasks_job(bot: Bot) -> None:
         for assignment in assignments:
             chore = assignment.chore
             reminder_times: list[str] = chore.reminder_times or []
-            # Check if the last reminder time has passed the timeout
-            for rtime in reminder_times:
-                h, m = map(int, rtime.split(":"))
-                reminder_dt = datetime(now.year, now.month, now.day, h, m, 0)
-                if reminder_dt <= cutoff.replace(tzinfo=None):
-                    # Mark overdue
-                    assignment.status = AssignmentStatus.MISSED
-                    assignment.overdue_notified = True
+            if not reminder_times:
+                continue
+            # Wait until AFTER the last reminder + timeout (not the first)
+            last_rtime = max(reminder_times)
+            h, m = map(int, last_rtime.split(":"))
+            reminder_dt = datetime(now.year, now.month, now.day, h, m, 0)
+            if reminder_dt <= cutoff_naive:
+                assignment.status = AssignmentStatus.MISSED
+                assignment.overdue_notified = True
 
-                    user_res = await session.execute(
-                        select(User).where(User.id == assignment.user_id)
-                    )
-                    user = user_res.scalars().first()
-                    if user:
-                        await record_missed(session, user)
-                        await notify_task_overdue(bot, user, assignment)
-                        logger.info(f"Marked overdue: {chore.name} for {user.name}")
-                    break
+                user_res = await session.execute(
+                    select(User).where(User.id == assignment.user_id)
+                )
+                user = user_res.scalars().first()
+                if user:
+                    await record_missed(session, user)
+                    await notify_task_overdue(bot, user, assignment)
+                    logger.info(f"Marked overdue: {chore.name} for {user.name}")
 
 
 async def regenerate_schedule_job() -> None:

@@ -247,6 +247,14 @@ async def addchore_freq_config(update: Update, context: ContextTypes.DEFAULT_TYP
 
         if freq == FrequencyType.WEEKLY:
             weekday = data.split(":")[1]
+            # SAFETY: weekday keyboard includes "Done Selecting" for multi-select;
+            # weekly needs a single real weekday name.
+            if weekday == "done" or weekday not in (
+                "Monday", "Tuesday", "Wednesday", "Thursday",
+                "Friday", "Saturday", "Sunday",
+            ):
+                await query.answer("Please tap a weekday (Mon–Sun).", show_alert=True)
+                return AC_FREQ_CONFIG
             context.user_data["chore"]["frequency_config"] = {"weekday": weekday}
             return await _ask_reminder_count(query, context)
 
