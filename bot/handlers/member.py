@@ -246,7 +246,7 @@ async def done_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> N
         member_name = member.name
 
         await record_completion(session, member)
-        await notify_group_task_done(query.bot, member, assignment)
+        await notify_group_task_done(context.bot, member, assignment)
 
     await query.edit_message_text(
         f"✅ <b>{chore_name}</b> marked as complete! Great job, {member_name}! 🎉",
@@ -302,7 +302,7 @@ async def handover_reason_handler(update: Update, context: ContextTypes.DEFAULT_
         assignment.status = AssignmentStatus.HANDED_OVER
 
         await record_handover_given(session, member)
-        await notify_group_handover_request(update.message.bot, member, assignment, handover)
+        await notify_group_handover_request(context.bot, member, assignment, handover)
 
     await update.message.reply_html(
         f"✅ Handover posted to group! First member to claim it gets the task."
@@ -352,7 +352,7 @@ async def handover_accept_callback(update: Update, context: ContextTypes.DEFAULT
         from_user = handover.from_user
         taker_name = taker.name
         await record_handover_taken(session, taker)
-        await notify_handover_accepted(query.bot, from_user, taker, assignment)
+        await notify_handover_accepted(context.bot, from_user, taker, assignment)
 
     await query.edit_message_text(
         f"✅ <b>{taker_name}</b> accepted the handover!",
@@ -728,7 +728,7 @@ async def markdone_select_member(
 
             chore_name = assignment.chore.name
             member_name = member.name
-            await notify_group_task_done(query.bot, member, assignment)
+            await notify_group_task_done(context.bot, member, assignment)
 
         await query.edit_message_text(
             f"✅ Matched! <b>{chore_name}</b> credited to <b>{member_name}</b>.\n"
