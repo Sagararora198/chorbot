@@ -5,13 +5,13 @@ from __future__ import annotations
 
 import logging
 
-from sqlalchemy import select
+from sqlalchemy import delete as sql_delete, select
 from telegram import Update
 from telegram.ext import ContextTypes
 
 from bot.database import get_session
 from bot.keyboards.inline import chore_list_keyboard
-from bot.models import Chore, Statistics, User
+from bot.models import Assignment, Chore, Handover, Statistics, Swap, User
 from bot.services.assignment_engine import generate_schedule
 from bot.services.stats_service import get_weekly_report_data
 from bot.utils.helpers import reply_html, reply_text
@@ -123,21 +123,61 @@ async def chore_select_callback(update: Update, context: ContextTypes.DEFAULT_TY
 async def delete_chore_confirm_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
     query = update.callback_query
     await query.answer()
-    chore_id = int(query.data.split(":")[1])
+    try:
+        chore_id = int(query.data.split(":")[1])
+    except (IndexError, ValueError):
+        await query.edit_message_text("❌ Invalid delete request.")
+        return
 
-    async with get_session() as session:
-        res = await session.execute(select(Chore).where(Chore.id == chore_id))
-        chore = res.scalars().first()
-        if chore:
+    try:
+        async with get_session() as session:
+            res = await session.execute(select(Chore).where(Chore.id == chore_id))
+            chore = res.scalars().first()
+            if not chore:
+                await query.edit_message_text("❌ Chore not found.")
+                return
+
             name = chore.name
-            await session.delete(chore)
-            await generate_schedule(session)
-            await query.edit_message_text(
-                f"✅ Chore <b>{name}</b> deleted and schedule updated.",
-                parse_mode="HTML"
+
+            # SAFETY: delete dependent rows first — FK from handovers/swaps → assignments
+            # blocks a plain chore delete and previously failed silently for the user.
+            asgn_ids = list(
+                (
+                    await session.execute(
+                        select(Assignment.id).where(Assignment.chore_id == chore_id)
+                    )
+                ).scalars().all()
             )
-        else:
-            await query.edit_message_text("❌ Chore not found.")
+            if asgn_ids:
+                await session.execute(
+                    sql_delete(Handover).where(Handover.assignment_id.in_(asgn_ids))
+                )
+                await session.execute(
+                    sql_delete(Swap).where(
+                        (Swap.assignment_id.in_(asgn_ids))
+                        | (Swap.target_assignment_id.in_(asgn_ids))
+                    )
+                )
+                await session.execute(
+                    sql_delete(Assignment).where(Assignment.chore_id == chore_id)
+                )
+
+            await session.delete(chore)
+            await session.flush()
+            await generate_schedule(session)
+
+        await query.edit_message_text(
+            f"✅ Chore <b>{name}</b> deleted and schedule updated.",
+            parse_mode="HTML",
+        )
+    except Exception as e:
+        logger.error("Failed to delete chore %s: %s", chore_id, e, exc_info=True)
+        try:
+            await query.edit_message_text(
+                "❌ Could not delete this chore. Try /reset then delete again."
+            )
+        except Exception:
+            pass
 
 
 async def cancel_callback(update: Update, context: ContextTypes.DEFAULT_TYPE) -> None:
